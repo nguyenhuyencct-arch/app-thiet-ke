@@ -31,19 +31,11 @@
 
 Mỗi công cụ mở thành một tab riêng, có thể chạy song song. Kết quả có nút tải PNG/SVG, so sánh trước/sau và "Dùng tiếp" để đưa kết quả làm ảnh đầu vào.
 
-### Chọn model & tiết kiệm chi phí
+### Model AI
 
-Mỗi công cụ tự chọn model vừa đủ cho việc của nó:
+Toàn bộ công cụ AI dùng một model mức trung bình: **Gemini Flash Image** (`gemini-3.1-flash-image`, ảnh 1K). Giao diện chỉ hiển thị kết quả, không hiện tên model hay các bước xử lý. Muốn đổi model: sửa `FIXED_TIER` / `FIXED_SIZE` / `DEFAULTS.models` trong `js/gemini.js`.
 
-| Bậc | Model | Dùng cho |
-|---|---|---|
-| Lite | `gemini-3.1-flash-lite-image` | Tách nền bằng AI, làm sạch ảnh trước khi trace vector |
-| Flash | `gemini-3.1-flash-image` | Kích nét, retouch, thay đồ, fake model, ảnh cũ, ảnh thẻ, bóc layer, mockup POD, chỉnh sửa tự do |
-| Pro | `gemini-3-pro-image` | Thiết kế quảng cáo, phối cảnh biển hiệu, phục hồi ấn phẩm, render 3D bao bì, phục hồi file in POD (cần chữ/logo chuẩn) |
-
-Trong **Cài đặt → Chế độ**: *Tiết kiệm* (không dùng Pro, ảnh 1K), *Tối ưu* (theo bảng trên), *Chất lượng cao* (nâng một bậc). Mỗi công cụ còn có ô **Model AI** để chọn riêng.
-
-Các cơ chế tiết kiệm khác: xóa nền / vector / bế file chạy offline miễn phí; yêu cầu trùng lặp được dùng lại kết quả; nếu một model không còn (404) app tự chuyển sang model khác. Pro cần bật Billing cho API key.
+Xóa nền / vector / bế file chạy offline miễn phí; yêu cầu trùng lặp được dùng lại kết quả, không gọi API lần hai.
 
 Xóa nền offline dùng thư viện `@imgly/background-removal` tải từ CDN ở lần dùng đầu (~40MB). Nếu không tải được, app tự chuyển sang Gemini.
 

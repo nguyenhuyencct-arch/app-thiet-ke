@@ -42,20 +42,20 @@
     },
   };
 
-  /** Resolve a requested tier (+ optional per-tool override) to { model, tier, size }. */
-  function resolve(tier = "flash", override) {
+  // The app always runs on the mid tier (Flash). Tiers/modes above are kept only as
+  // fallbacks when a model is unavailable; they are not exposed in the UI.
+  const FIXED_TIER = "flash";
+  const FIXED_SIZE = "1K";
+  function resolve() {
     const s = Settings.get();
-    const mode = MODES[s.mode];
-    const t = override && override !== "auto" ? override : mode.map[tier] || "flash";
-    const size = s.imageSize === "auto" ? mode.size[t] : s.imageSize;
-    return { model: s.models[t], tier: t, size };
+    return { model: s.models[FIXED_TIER], tier: FIXED_TIER, size: FIXED_SIZE };
   }
 
   function friendlyError(status, body) {
     const msg = body?.error?.message || "";
     if (status === 400 && /API key/i.test(msg)) return "API key không hợp lệ. Kiểm tra lại trong Cài đặt.";
-    if (status === 403) return "API key không có quyền dùng model này (403). " + msg;
-    if (status === 404) return "Không tìm thấy model. Kiểm tra tên model trong Cài đặt. " + msg;
+    if (status === 403) return "API key chưa được cấp quyền tạo ảnh (403). Kiểm tra lại tài khoản Google AI Studio.";
+    if (status === 404) return "Dịch vụ AI tạm thời không khả dụng. Thử lại sau.";
     if (status === 429) return "Hết hạn mức / gửi quá nhanh (429). Đợi một lát rồi thử lại, hoặc bật thanh toán cho API key.";
     if (status >= 500) return "Máy chủ Gemini đang bận (" + status + "). Thử lại sau.";
     return msg || "Lỗi " + status;
@@ -113,8 +113,8 @@
     }
     parts.push({ text: prompt });
 
-    const first = resolve(tier, override);
-    const order = [first.tier, ...["pro", "flash", "lite"].filter((t) => t !== first.tier)];
+    const first = resolve();
+    const order = ["flash", "lite", "pro"];
     let json, used, lastErr;
     for (const t of order) {
       const { model } = { model: Settings.get().models[t] };
@@ -154,7 +154,9 @@
     if (!out.images.length) {
       const reason = cand?.finishReason || json.promptFeedback?.blockReason;
       throw new Error(
-        "AI không trả về ảnh" + (reason ? ` (${reason})` : "") + (out.text ? ": " + out.text.slice(0, 300) : ". Thử đổi ảnh hoặc mô tả.")
+        reason === "SAFETY" || reason === "PROHIBITED_CONTENT" || reason === "IMAGE_SAFETY"
+          ? "Ảnh hoặc yêu cầu vi phạm chính sách nội dung. Thử ảnh / mô tả khác."
+          : "Không tạo được ảnh. Thử đổi ảnh hoặc mô tả rồi chạy lại."
       );
     }
     cache.set(used.key, out);
