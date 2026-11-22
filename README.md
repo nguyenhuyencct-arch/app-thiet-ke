@@ -31,7 +31,7 @@
 
 Mỗi công cụ mở thành một tab riêng, có thể chạy song song. Kết quả có nút tải PNG/SVG, so sánh trước/sau và "Dùng tiếp" để đưa kết quả làm ảnh đầu vào.
 
-Các công cụ AI dùng model `gemini-2.5-flash-image` (đổi được trong Cài đặt, ví dụ `gemini-3-pro-image-preview` cho chất lượng cao hơn). API key chỉ lưu trong trình duyệt của bạn (localStorage) và được gửi thẳng tới Google.
+Các công cụ AI dùng model `gemini-3.1-flash-image` (Nano Banana 2) (đổi được trong Cài đặt, ví dụ `gemini-3-pro-image-preview` cho chất lượng cao hơn). API key chỉ lưu trong trình duyệt của bạn (localStorage) và được gửi thẳng tới Google.
 
 Xóa nền offline dùng thư viện `@imgly/background-removal` tải từ CDN ở lần dùng đầu (~40MB). Nếu không tải được, app tự chuyển sang Gemini.
 
