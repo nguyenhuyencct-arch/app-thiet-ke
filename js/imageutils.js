@@ -263,6 +263,56 @@
     return o.toDataURL("image/png");
   };
 
+  /* ---------- layer mask helpers ---------- */
+  IU.alphaOf = async (src, W, H) => {
+    const img = await IU.loadImage(src);
+    const c = IU.canvas(W, H);
+    c.getContext("2d").drawImage(img, 0, 0, W, H);
+    const d = c.getContext("2d").getImageData(0, 0, W, H).data;
+    const a = new Uint8ClampedArray(W * H);
+    for (let p = 0; p < W * H; p++) a[p] = d[p * 4 + 3];
+    return a;
+  };
+  IU.alphaToDataURL = (alpha, W, H) => {
+    const c = IU.canvas(W, H);
+    const ctx = c.getContext("2d");
+    const im = ctx.createImageData(W, H);
+    for (let p = 0; p < W * H; p++) { const i = p * 4; im.data[i] = im.data[i + 1] = im.data[i + 2] = 255; im.data[i + 3] = alpha[p]; }
+    ctx.putImageData(im, 0, 0);
+    return c.toDataURL("image/png");
+  };
+  /** Gemini box_2d [ymin,xmin,ymax,xmax] (0-1000) → [x0,y0,x1,y1] px, padded by `pad` of image size. */
+  IU.boxToPx = (b, W, H, pad = 0) => {
+    if (!Array.isArray(b) || b.length !== 4 || b.some((v) => typeof v !== "number")) return null;
+    const [y0, x0, y1, x1] = b;
+    const px = pad * W, py = pad * H;
+    const r = [
+      Math.max(0, Math.floor((Math.min(x0, x1) / 1000) * W - px)),
+      Math.max(0, Math.floor((Math.min(y0, y1) / 1000) * H - py)),
+      Math.min(W, Math.ceil((Math.max(x0, x1) / 1000) * W + px)),
+      Math.min(H, Math.ceil((Math.max(y0, y1) / 1000) * H + py)),
+    ];
+    return r[2] - r[0] > 4 && r[3] - r[1] > 4 ? r : null;
+  };
+  IU.clipAlpha = (alpha, W, H, [x0, y0, x1, y1]) => {
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        if (x < x0 || x >= x1 || y < y0 || y >= y1) alpha[y * W + x] = 0;
+  };
+  /** Resolve overlaps: a pixel claimed (alpha ≥ 128) by several layers stays only in the one with the smallest area. */
+  IU.exclusiveAlpha = (masks, W, H) => {
+    const order = masks.map((m, i) => i).sort((a, b) => masks[a].area - masks[b].area);
+    const owner = new Int16Array(W * H).fill(-1);
+    for (const i of order) {
+      const a = masks[i].alpha;
+      for (let p = 0; p < W * H; p++) if (a[p] >= 128 && owner[p] === -1) owner[p] = i;
+    }
+    masks.forEach((m, i) => {
+      const a = m.alpha;
+      for (let p = 0; p < W * H; p++) if (owner[p] !== -1 && owner[p] !== i) a[p] = 0;
+    });
+  };
+
   /** Trim transparent margins. */
   IU.trim = async (src, pad = 0) => {
     const c = await IU.toCanvas(src);
@@ -520,6 +570,37 @@
         ctx.strokeRect(x - 0.5, y - 0.5, pw + 1, ph + 1);
       }
     return { png: c.toDataURL("image/png"), count: rows * cols, single: photo.src };
+  };
+
+  IU.dataURLToBytes = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
+
+  /** Minimal ZIP writer (store, no compression — PNGs are already compressed). files: [{name, data:Uint8Array}] */
+  IU.zip = (files) => {
+    const crcTable = IU._crc || (IU._crc = Array.from({ length: 256 }, (_, n) => {
+      let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0;
+    }));
+    const crc32 = (d) => { let c = 0xffffffff; for (let i = 0; i < d.length; i++) c = crcTable[(c ^ d[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const enc = new TextEncoder();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name), crc = crc32(f.data), size = f.data.length;
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, size, true); lh.setUint32(22, size, true); lh.setUint16(26, name.length, true);
+      parts.push(new Uint8Array(lh.buffer), name, f.data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true);
+      ch.setUint32(16, crc, true); ch.setUint32(20, size, true); ch.setUint32(24, size, true); ch.setUint16(28, name.length, true);
+      ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + size;
+    }
+    const cdSize = central.reduce((n, p) => n + p.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
   };
 
   IU.download = (url, name) => {

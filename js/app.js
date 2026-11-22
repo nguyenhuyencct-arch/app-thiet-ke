@@ -204,7 +204,21 @@
 
     // right: results
     const statusEl = h("div", { class: "status" }, "Sẵn sàng");
-    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; showEmpty(); } }, "Xóa kết quả");
+    const outputs = [];
+    const zipBtn = h("button", { class: "btn small", hidden: true, onclick: async () => {
+      const files = [];
+      const used = new Set();
+      for (const r of outputs.slice().reverse()) {
+        let base = r.name, n = 2;
+        while (used.has(base)) base = `${r.name}-${n++}`;
+        used.add(base);
+        files.push({ name: base + ".png", data: await IU.dataURLToBytes(await toPng(r.src)) });
+        if (r.svg) files.push({ name: base + ".svg", data: new TextEncoder().encode(r.svg) });
+      }
+      files.sort((a, b) => a.name.localeCompare(b.name));
+      IU.download(URL.createObjectURL(IU.zip(files)), `${tool.id}-${Date.now()}.zip`);
+    } }, "Tải tất cả (ZIP)");
+    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; outputs.length = 0; zipBtn.hidden = true; showEmpty(); } }, "Xóa kết quả");
     const bar = h("div");
     const progress = h("div", { class: "progress", hidden: true }, bar);
     const results = h("div", { class: "results" });
@@ -212,7 +226,7 @@
     const empty = h("div", { class: "empty", html: `<div>${svg('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>')}<div>Kết quả sẽ hiển thị ở đây</div></div>` });
     const showEmpty = () => { empty.hidden = results.children.length > 0; };
     const right = h("div", { class: "panel" },
-      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, clearBtn)),
+      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, zipBtn, clearBtn)),
       progress, empty, results, notes);
 
     // paste support while this tab is active
@@ -234,6 +248,8 @@
     };
 
     function addResult(r) {
+      outputs.push(r);
+      zipBtn.hidden = outputs.length < 2;
       const fname = (r.name || tool.id) + (r.svg ? ".svg" : "");
       const pngName = (r.name || tool.id) + ".png";
       const card = h("div", { class: "result" },
@@ -313,6 +329,9 @@
     return h("section", { class: "view", "data-view": tab.id, hidden: true }, h("div", { class: "workspace" }, left, right));
   }
 
+  async function toPng(src) {
+    return src.startsWith("data:image/png") ? src : (await IU.toCanvas(src)).toDataURL("image/png");
+  }
   async function downloadResult(src, name) {
     // convert any format to PNG so the extension is honest
     if (!src.startsWith("data:image/png")) {

@@ -116,33 +116,62 @@
       const src = ctx.img("main");
       const { w, h } = await IU.size(src);
       const ar = IU.nearestRatio(w, h);
-      let objs = (ctx.opt.objects || "").split("\n").map((s) => s.trim()).filter(Boolean);
-      if (!objs.length) {
-        ctx.progress("AI đang nhận diện các đối tượng…", 0.05);
+      const max = ctx.opt.max;
+      const given = (ctx.opt.objects || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, max);
+
+      // 1. detect elements WITH bounding boxes (0–1000 normalised, [ymin, xmin, ymax, xmax])
+      ctx.progress("Đang nhận diện…", 0.03);
+      let found = [];
+      try {
         const res = await ctx.ai.text({
           images: [src], json: true,
-          prompt: `List the distinct visual elements in this image that a graphic designer would want on separate layers (products, people, logos, text blocks, decorative elements). Do not list the background. Return JSON: {"objects":["short english description", ...]} with at most ${ctx.opt.max} items, most important first.`,
+          prompt: (given.length
+            ? `Locate these elements in the image: ${given.map((g) => `"${g}"`).join(", ")}. Keep the same order and labels.`
+            : `List the distinct visual elements a graphic designer would want on separate layers (people, products, logos, headline text blocks, info panels, buttons, decorative shapes). Do NOT list the background photo / backdrop. At most ${max} items, most important first.`) +
+            ` Each element must be one self-contained, non-overlapping group (e.g. a whole headline block, not single words). ` +
+            `Return JSON: {"objects":[{"label":"short english description","box_2d":[ymin,xmin,ymax,xmax]}]} with coordinates normalised to 0-1000.`,
         });
-        objs = (res.objects || []).slice(0, ctx.opt.max);
-        ctx.note("AI nhận diện: " + objs.join(", "));
+        found = (res.objects || []).filter((o) => o && o.label).slice(0, max);
+      } catch (e) { console.warn("detection failed", e); }
+      if (given.length) {
+        // keep the user's wording, attach boxes when the model returned them in order
+        found = given.map((label, i) => ({ label, box_2d: found[i]?.box_2d }));
       }
-      objs = objs.slice(0, ctx.opt.max);
-      if (!objs.length) throw new Error("Không tìm thấy đối tượng nào để tách.");
+      if (!found.length) throw new Error("Không tìm thấy đối tượng nào để tách.");
+      const objs = found.map((o) => o.label);
+
       const keyHex = ctx.opt.key === "magenta" ? "#FF00FF" : "#00FF00";
       const keyRGB = ctx.opt.key === "magenta" ? [255, 0, 255] : [0, 255, 0];
       const total = objs.length + (ctx.opt.bgLayer ? 1 : 0);
-      for (let i = 0; i < objs.length; i++) {
-        ctx.progress(`Đang tách layer ${i + 1}/${total}: ${objs[i]}`, (i + 0.2) / total);
+
+      // 2. one AI mask per element, clipped to its own box
+      const masks = [];
+      for (let i = 0; i < found.length; i++) {
+        ctx.progress(`Đang tách layer ${i + 1}/${total}`, (i + 0.2) / total);
+        const others = objs.filter((_, k) => k !== i);
         const out = await ctx.ai.image({
           images: [src], aspectRatio: ar,
           prompt:
-            `Isolate ONLY this element: "${objs[i]}". Keep it at exactly the same position, size, rotation and appearance as in the original image. ` +
-            `Replace absolutely everything else (background and all other elements) with a perfectly flat, solid pure ${keyHex} colour. No shadows, no reflections, no outlines, no other objects.`,
+            `Isolate ONLY this element: "${objs[i]}". Keep it pixel-aligned with the original: exact same position, size, rotation and appearance. ` +
+            (others.length ? `These other elements must NOT appear and must be turned into background: ${others.map((o) => `"${o}"`).join(", ")}. ` : "") +
+            `Replace absolutely everything except "${objs[i]}" with a perfectly flat, solid pure ${keyHex} colour. No shadows, no reflections, no outlines, no glow.`,
         });
         const fitted = await IU.fitTo(out, w, h, "cover");
         const mask = await IU.chromaKey(fitted, keyRGB, 35, 2);
-        ctx.emit({ src: await IU.maskOriginal(src, mask), name: `layer-${String(i + 1).padStart(2, "0")}-${slug(objs[i])}`, before: src });
+        const alpha = await IU.alphaOf(mask, w, h);
+        const box = IU.boxToPx(found[i].box_2d, w, h, 0.03);
+        if (box) IU.clipAlpha(alpha, w, h, box);
+        masks.push({ alpha, box, area: box ? (box[2] - box[0]) * (box[3] - box[1]) : w * h });
       }
+
+      // 3. every pixel belongs to exactly one layer: the claimant with the smallest box
+      //    (small elements such as buttons sit in front of large ones)
+      IU.exclusiveAlpha(masks, w, h);
+      for (let i = 0; i < masks.length; i++) {
+        const png = await IU.maskOriginal(src, IU.alphaToDataURL(masks[i].alpha, w, h));
+        ctx.emit({ src: png, name: `layer-${String(i + 1).padStart(2, "0")}-${slug(objs[i])}`, before: src });
+      }
+
       if (ctx.opt.bgLayer) {
         ctx.progress(`Đang tạo layer nền ${total}/${total}`, (total - 0.8) / total);
         const out = await ctx.ai.image({
