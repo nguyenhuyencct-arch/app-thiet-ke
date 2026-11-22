@@ -75,6 +75,10 @@
     const c = IU.canvas(w, h);
     const ctx = c.getContext("2d");
     ctx.imageSmoothingQuality = "high";
+    if (mode === "fill") {
+      ctx.drawImage(img, 0, 0, w, h);
+      return c.toDataURL("image/png");
+    }
     const s = mode === "cover"
       ? Math.max(w / img.naturalWidth, h / img.naturalHeight)
       : Math.min(w / img.naturalWidth, h / img.naturalHeight);
@@ -293,6 +297,67 @@
       Math.min(H, Math.ceil((Math.max(y0, y1) / 1000) * H + py)),
     ];
     return r[2] - r[0] > 4 && r[3] - r[1] > 4 ? r : null;
+  };
+  const blurredData = async (src, W, H, r = 1) => {
+    const img = await IU.loadImage(src);
+    const c = IU.canvas(W, H);
+    const ctx = c.getContext("2d");
+    ctx.filter = `blur(${r}px)`;
+    ctx.drawImage(img, 0, 0, W, H);
+    return ctx.getImageData(0, 0, W, H).data;
+  };
+  /** Mean colour difference between two images outside the given boxes (alignment check). */
+  IU.diffOutside = async (a, b, boxes) => {
+    const { w: W, h: H } = await IU.size(a);
+    const da = await blurredData(a, W, H, 1.5), db = await blurredData(b, W, H, 1.5);
+    let sum = 0, n = 0;
+    const step = Math.max(1, Math.round(Math.sqrt((W * H) / 60000)));
+    for (let y = 0; y < H; y += step)
+      for (let x = 0; x < W; x += step) {
+        if (boxes.some(([x0, y0, x1, y1]) => x >= x0 && x < x1 && y >= y0 && y < y1)) continue;
+        const i = (y * W + x) * 4;
+        sum += Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]));
+        n++;
+      }
+    return n ? sum / n : 0;
+  };
+  /** Foreground mask = where the original differs from the clean background plate (inside box only). */
+  IU.diffMask = async (orig, plate, W, H, [x0, y0, x1, y1]) => {
+    const da = await blurredData(orig, W, H, 0.6), db = await blurredData(plate, W, H, 0.6);
+    const alpha = new Uint8ClampedArray(W * H);
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        const i = (y * W + x) * 4;
+        const d = Math.max(Math.abs(da[i] - db[i]), Math.abs(da[i + 1] - db[i + 1]), Math.abs(da[i + 2] - db[i + 2]));
+        let a = d <= 20 ? 0 : d >= 48 ? 1 : (d - 20) / 28;
+        alpha[y * W + x] = Math.round(a * a * (3 - 2 * a) * 255);
+      }
+    // drop specks (compression noise) smaller than ~0.02% of the box
+    const minSize = Math.max(12, ((x1 - x0) * (y1 - y0)) / 5000);
+    const seen = new Uint8Array(W * H);
+    for (let y = y0; y < y1; y++)
+      for (let x = x0; x < x1; x++) {
+        const p0 = y * W + x;
+        if (seen[p0] || alpha[p0] < 64) continue;
+        const comp = [p0]; seen[p0] = 1;
+        for (let k = 0; k < comp.length; k++) {
+          const q = comp[k], qx = q % W, qy = (q / W) | 0;
+          for (const [nx, ny] of [[qx - 1, qy], [qx + 1, qy], [qx, qy - 1], [qx, qy + 1]]) {
+            if (nx < x0 || nx >= x1 || ny < y0 || ny >= y1) continue;
+            const n = ny * W + nx;
+            if (!seen[n] && alpha[n] >= 64) { seen[n] = 1; comp.push(n); }
+          }
+        }
+        if (comp.length < minSize) for (const q of comp) alpha[q] = 0;
+      }
+    return alpha;
+  };
+  /** A diff mask is trusted only if it covers a sensible share of its box. */
+  IU.maskLooksValid = (alpha, W, [x0, y0, x1, y1]) => {
+    let on = 0;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (alpha[y * W + x] >= 128) on++;
+    const r = on / Math.max(1, (x1 - x0) * (y1 - y0));
+    return r > 0.01 && r < 0.97;
   };
   IU.clipAlpha = (alpha, W, H, [x0, y0, x1, y1]) => {
     for (let y = 0; y < H; y++)
@@ -584,6 +649,37 @@
       document.head.append(s);
     }));
 
+  /** AI text block → ag-psd text layer (hidden; Photoshop asks to "Update" text on open). */
+  IU.textLayer = (t, W, H) => {
+    const [y0, x0, y1, x1] = t.box_2d.map(Number);
+    const bx0 = (Math.min(x0, x1) / 1000) * W, bx1 = (Math.max(x0, x1) / 1000) * W;
+    const by0 = (Math.min(y0, y1) / 1000) * H, by1 = (Math.max(y0, y1) / 1000) * H;
+    const lines = Math.max(1, +t.lines || String(t.text).split("\n").length);
+    const fontSize = Math.max(6, Math.round((by1 - by0) / lines / 1.15));
+    const weight = t.weight || "regular", italic = !!t.italic, style = t.style || "sans";
+    let font;
+    if (style === "serif") font = weight === "regular" ? (italic ? "TimesNewRomanPS-ItalicMT" : "TimesNewRomanPSMT") : (italic ? "TimesNewRomanPS-BoldItalicMT" : "TimesNewRomanPS-BoldMT");
+    else if (style === "script" || style === "handwriting") font = "SegoeScript";
+    else if (style === "display" || style === "condensed" || weight === "black") font = "Arial-Black";
+    else font = weight === "bold" ? (italic ? "Arial-BoldItalicMT" : "Arial-BoldMT") : (italic ? "Arial-ItalicMT" : "ArialMT");
+    const align = ["left", "center", "right"].includes(t.align) ? t.align : "left";
+    const x = align === "center" ? (bx0 + bx1) / 2 : align === "right" ? bx1 : bx0;
+    const y = by0 + fontSize * 0.9;
+    const a = ((+t.angle || 0) * Math.PI) / 180;
+    const m = /^#?([0-9a-f]{6})$/i.exec(String(t.color || "").trim());
+    const rgb = m ? { r: parseInt(m[1].slice(0, 2), 16), g: parseInt(m[1].slice(2, 4), 16), b: parseInt(m[1].slice(4, 6), 16) } : { r: 0, g: 0, b: 0 };
+    const label = String(t.text).replace(/\s+/g, " ").slice(0, 40);
+    return {
+      name: `✎ ${label}${t.font_guess ? ` (font gợi ý: ${t.font_guess})` : ""}`,
+      text: {
+        text: String(t.text).replace(/\r/g, ""),
+        transform: [Math.cos(a), Math.sin(a), -Math.sin(a), Math.cos(a), x, y],
+        style: { font: { name: font }, fontSize, fillColor: rgb, autoLeading: true },
+        paragraphStyle: { justification: align },
+      },
+    };
+  };
+
   /** Bounding box of non-transparent pixels → {x, y, w, h} or null. */
   IU.alphaBounds = (canvas) => {
     const W = canvas.width, H = canvas.height;
@@ -606,6 +702,10 @@
     const cctx = composite.getContext("2d");
     const children = [];
     for (const L of layers) {
+      if (L.children) { // group of editable text layers
+        children.push({ name: L.name, opened: true, hidden: !!L.hidden, children: L.children });
+        continue;
+      }
       const img = await IU.loadImage(L.src);
       const full = IU.canvas(W, H);
       full.getContext("2d").drawImage(img, 0, 0, W, H);

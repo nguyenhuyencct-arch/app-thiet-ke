@@ -107,8 +107,10 @@
     desc: "Tự động phân tách tối đa 9 đối tượng thành các layer PNG & 1 layer nền, xuất file PSD mở thẳng bằng Photoshop.",
     inputs: [{ key: "main", label: "Ảnh thiết kế / ảnh chụp", required: true }],
     options: [
-      { key: "objects", label: "Các đối tượng cần tách (mỗi dòng một đối tượng)", type: "textarea", placeholder: "Để trống để AI tự nhận diện.\nVD:\nchai nước hoa\ndòng chữ tiêu đề\nlogo" },
-      { key: "max", label: "Số layer tối đa", type: "range", min: 1, max: 9, default: 5 },
+      { key: "mode", label: "Chế độ tách", type: "seg", default: "eco", choices: [["eco", "Tiết kiệm (khuyên dùng)"], ["ai", "Chính xác (AI từng layer)"]] },
+      { key: "objects", label: "Các đối tượng cần tách (mỗi dòng một đối tượng)", type: "textarea", placeholder: "Để trống để tự nhận diện.\nVD:\ncô gái\ntiêu đề Tuyển sinh\nnút Đăng ký" },
+      { key: "max", label: "Số layer tối đa", type: "range", min: 1, max: 9, default: 6 },
+      { key: "texts", label: "Nhận diện chữ thành văn bản sửa được (PSD)", type: "check", default: true },
       { key: "bgLayer", label: "Tạo thêm layer nền (đã xóa đối tượng)", type: "check", default: true },
       { key: "key", label: "Màu phông tách (đổi nếu đối tượng có màu xanh lá)", type: "seg", default: "green", choices: [["green", "Xanh lá"], ["magenta", "Hồng"]] },
     ],
@@ -117,10 +119,11 @@
       const { w, h } = await IU.size(src);
       const ar = IU.nearestRatio(w, h);
       const max = ctx.opt.max;
+      const eco = ctx.opt.mode === "eco";
       const given = (ctx.opt.objects || "").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, max);
+      ctx.progress();
 
-      // 1. detect elements WITH bounding boxes (0–1000 normalised, [ymin, xmin, ymax, xmax])
-      ctx.progress("Đang nhận diện…", 0.03);
+      // 1. detect elements with boxes + kind (complex = needs an AI mask)
       let found = [];
       try {
         const res = await ctx.ai.text({
@@ -129,57 +132,84 @@
             ? `Locate these elements in the image: ${given.map((g) => `"${g}"`).join(", ")}. Keep the same order and labels.`
             : `List the distinct visual elements a graphic designer would want on separate layers (people, products, logos, headline text blocks, info panels, buttons, decorative shapes). Do NOT list the background photo / backdrop. At most ${max} items, most important first.`) +
             ` Each element must be one self-contained, non-overlapping group (e.g. a whole headline block, not single words). ` +
-            `Return JSON: {"objects":[{"label":"short english description","box_2d":[ymin,xmin,ymax,xmax]}]} with coordinates normalised to 0-1000.`,
+            `"kind" is one of: person, product, animal, photo, text, logo, shape, button, panel, icon. ` +
+            `Return JSON: {"objects":[{"label":"short english description","kind":"...","box_2d":[ymin,xmin,ymax,xmax]}]} with coordinates normalised to 0-1000.`,
         });
         found = (res.objects || []).filter((o) => o && o.label).slice(0, max);
       } catch (e) { console.warn("detection failed", e); }
-      if (given.length) {
-        // keep the user's wording, attach boxes when the model returned them in order
-        found = given.map((label, i) => ({ label, box_2d: found[i]?.box_2d }));
-      }
+      if (given.length) found = given.map((label, i) => ({ label, kind: found[i]?.kind, box_2d: found[i]?.box_2d }));
       if (!found.length) throw new Error("Không tìm thấy đối tượng nào để tách.");
       const objs = found.map((o) => o.label);
 
+      // text blocks → editable text (cheap text-model call)
+      let texts = [];
+      if (ctx.opt.texts) {
+        try {
+          const res = await ctx.ai.text({
+            images: [src], json: true,
+            prompt:
+              "Extract every distinct block of visible text in this image (keep Vietnamese diacritics exactly, keep line breaks with \\n). For each block return: " +
+              '"text", "box_2d":[ymin,xmin,ymax,xmax] (0-1000) of the whole block, "lines" (number of lines), "color" (main fill hex like #ff6600), ' +
+              '"weight" ("regular" | "bold" | "black"), "italic" (true/false), "style" ("sans" | "serif" | "display" | "condensed" | "script" | "handwriting"), ' +
+              '"font_guess" (closest Google Font name), "align" ("left" | "center" | "right"), "angle" (rotation in degrees, clockwise positive, 0 if straight). ' +
+              'Return JSON: {"texts":[...]}',
+          });
+          texts = (res.texts || []).filter((t) => t && t.text && Array.isArray(t.box_2d));
+        } catch (e) { console.warn("text extraction failed", e); }
+      }
+
       const keyHex = ctx.opt.key === "magenta" ? "#FF00FF" : "#00FF00";
       const keyRGB = ctx.opt.key === "magenta" ? [255, 0, 255] : [0, 255, 0];
-      const total = objs.length + (ctx.opt.bgLayer ? 1 : 0);
+      const COMPLEX = new Set(["person", "product", "animal", "photo"]);
 
-      // 2. one AI mask per element, clipped to its own box
-      const masks = [];
-      for (let i = 0; i < found.length; i++) {
-        ctx.progress(`Đang tách layer ${i + 1}/${total}`, (i + 0.2) / total);
-        const others = objs.filter((_, k) => k !== i);
+      // 2. clean background plate (needed for the layer and for eco-mode diff masks)
+      let plate = null, plateOk = false;
+      if (ctx.opt.bgLayer || eco) {
         const out = await ctx.ai.image({
           images: [src], aspectRatio: ar,
-          prompt:
-            `Isolate ONLY this element: "${objs[i]}". Keep it pixel-aligned with the original: exact same position, size, rotation and appearance. ` +
-            (others.length ? `These other elements must NOT appear and must be turned into background: ${others.map((o) => `"${o}"`).join(", ")}. ` : "") +
-            `Replace absolutely everything except "${objs[i]}" with a perfectly flat, solid pure ${keyHex} colour. No shadows, no reflections, no outlines, no glow.`,
+          prompt: `Remove these elements from the image: ${objs.join("; ")}. Fill the areas naturally with the surrounding background so it looks like they were never there. Keep everything else identical and pixel-aligned. ${KEEP}`,
         });
-        const fitted = await IU.fitTo(out, w, h, "cover");
-        const mask = await IU.chromaKey(fitted, keyRGB, 35, 2);
-        const alpha = await IU.alphaOf(mask, w, h);
+        plate = await IU.fitTo(out, w, h, "fill");
+        if (eco) {
+          const boxes = found.map((o) => IU.boxToPx(o.box_2d, w, h, 0.02)).filter(Boolean);
+          plateOk = (await IU.diffOutside(src, plate, boxes)) < 22; // plate must match the original away from the elements
+          if (!plateOk) console.info("background plate misaligned → AI masks for every layer");
+        }
+      }
+
+      // 3. one mask per element: local diff for flat elements, AI for complex ones
+      const masks = [];
+      for (let i = 0; i < found.length; i++) {
         const box = IU.boxToPx(found[i].box_2d, w, h, 0.03);
+        let alpha = null;
+        if (eco && plateOk && box && !COMPLEX.has(found[i].kind)) {
+          alpha = await IU.diffMask(src, plate, w, h, box);
+          if (!IU.maskLooksValid(alpha, w, box)) alpha = null; // fall back to AI
+        }
+        if (!alpha) {
+          const others = objs.filter((_, k) => k !== i);
+          const out = await ctx.ai.image({
+            images: [src], aspectRatio: ar,
+            prompt:
+              `Isolate ONLY this element: "${objs[i]}". Keep it pixel-aligned with the original: exact same position, size, rotation and appearance. ` +
+              (others.length ? `These other elements must NOT appear and must be turned into background: ${others.map((o) => `"${o}"`).join(", ")}. ` : "") +
+              `Replace absolutely everything except "${objs[i]}" with a perfectly flat, solid pure ${keyHex} colour. No shadows, no reflections, no outlines, no glow.`,
+          });
+          const fitted = await IU.fitTo(out, w, h, "cover");
+          alpha = await IU.alphaOf(await IU.chromaKey(fitted, keyRGB, 35, 2), w, h);
+        }
         if (box) IU.clipAlpha(alpha, w, h, box);
         masks.push({ alpha, box, area: box ? (box[2] - box[0]) * (box[3] - box[1]) : w * h });
       }
 
-      // 3. every pixel belongs to exactly one layer: the claimant with the smallest box
-      //    (small elements such as buttons sit in front of large ones)
+      // 4. every pixel belongs to exactly one layer
       IU.exclusiveAlpha(masks, w, h);
       for (let i = 0; i < masks.length; i++) {
         const png = await IU.maskOriginal(src, IU.alphaToDataURL(masks[i].alpha, w, h));
         ctx.emit({ src: png, name: `layer-${String(i + 1).padStart(2, "0")}-${slug(objs[i])}`, before: src });
       }
-
-      if (ctx.opt.bgLayer) {
-        ctx.progress(`Đang tạo layer nền ${total}/${total}`, (total - 0.8) / total);
-        const out = await ctx.ai.image({
-          images: [src], aspectRatio: ar,
-          prompt: `Remove these elements from the image: ${objs.join("; ")}. Fill the areas naturally with the surrounding background so it looks like they were never there. Keep everything else identical. ${KEEP}`,
-        });
-        ctx.emit({ src: await IU.fitTo(out, w, h, "cover"), name: "layer-00-background", before: src });
-      }
+      if (ctx.opt.bgLayer && plate) ctx.emit({ src: plate, name: "layer-00-background", before: src });
+      if (texts.length) ctx.emit({ kind: "text", texts, size: [w, h], name: "chu-trong-anh" });
     },
   });
 

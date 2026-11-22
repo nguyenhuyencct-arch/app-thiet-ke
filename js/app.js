@@ -209,6 +209,10 @@
       const files = [];
       const used = new Set();
       for (const r of outputs.slice().reverse()) {
+        if (r.kind === "text") {
+          files.push({ name: "chu-trong-anh.txt", data: new TextEncoder().encode(r.texts.map((t) => t.text).join("\n\n")) });
+          continue;
+        }
         let base = r.name, n = 2;
         while (used.has(base)) base = `${r.name}-${n++}`;
         used.add(base);
@@ -227,9 +231,11 @@
       try {
         const { w, h: H } = await IU.size(runSource);
         // bottom → top: original (hidden) · background · big elements … small elements
-        const bg = runOutputs.filter((r) => /layer-00/.test(r.name));
+        const imgs = runOutputs.filter((r) => r.kind !== "text");
+        const textRes = runOutputs.find((r) => r.kind === "text");
+        const bg = imgs.filter((r) => /layer-00/.test(r.name));
         const els = [];
-        for (const r of runOutputs.filter((r) => !/layer-00/.test(r.name))) {
+        for (const r of imgs.filter((r) => !/layer-00/.test(r.name))) {
           const b = IU.alphaBounds(await IU.toCanvas(r.src));
           els.push({ r, area: b ? b.w * b.h : 0 });
         }
@@ -238,8 +244,9 @@
         const layers = [
           { name: "Ảnh gốc", src: runSource, hidden: true },
           ...bg.map((r) => ({ name: "Nền", src: r.src })),
-          ...els.map(({ r }) => ({ name: pretty(r.name), src: r.src })),
+          ...els.map(({ r }) => ({ name: r.label || pretty(r.name), src: r.src })),
         ];
+        if (textRes) layers.push({ name: "Chữ sửa được (bật để chỉnh)", hidden: true, children: textRes.texts.map((t) => IU.textLayer(t, w, H)) });
         const blob = await IU.buildPSD(layers, w, H);
         IU.download(URL.createObjectURL(blob), `${tool.id}-${Date.now()}.psd`);
         toast("Đã xuất PSD " + layers.length + " layer", "ok");
@@ -251,7 +258,32 @@
         psdBtn.textContent = label;
       }
     } }, "Tải PSD");
-    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; outputs.length = 0; runOutputs = []; zipBtn.hidden = psdBtn.hidden = true; showEmpty(); } }, "Xóa kết quả");
+    const editBtn = h("button", { class: "btn small", hidden: true, onclick: () => {
+      const imgs = runOutputs.filter((r) => r.kind !== "text");
+      LayerEditor.open({
+        original: runSource,
+        layers: imgs.map((r) => ({ ref: r, name: r.label || r.name, src: r.src })),
+        onSave: (edited) => {
+          const keep = new Set(edited.filter((L) => L.ref).map((L) => L.ref));
+          for (const r of imgs) if (!keep.has(r)) {
+            r.card?.remove();
+            runOutputs.splice(runOutputs.indexOf(r), 1);
+            outputs.splice(outputs.indexOf(r), 1);
+          }
+          for (const L of edited) {
+            if (L.ref) {
+              L.ref.src = L.src; L.ref.label = L.name;
+              const img = L.ref.card?.querySelector("img"); if (img) img.src = L.src;
+              const nm = L.ref.card?.querySelector(".name"); if (nm) nm.textContent = L.name;
+            } else {
+              addResult({ src: L.src, name: L.name, label: L.name, before: runSource });
+            }
+          }
+          toast("Đã cập nhật layer", "ok");
+        },
+      });
+    } }, "Sửa layer");
+    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; outputs.length = 0; runOutputs = []; zipBtn.hidden = psdBtn.hidden = editBtn.hidden = true; showEmpty(); } }, "Xóa kết quả");
     const bar = h("div");
     const progress = h("div", { class: "progress", hidden: true }, bar);
     const results = h("div", { class: "results" });
@@ -259,7 +291,7 @@
     const empty = h("div", { class: "empty", html: `<div>${svg('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>')}<div>Kết quả sẽ hiển thị ở đây</div></div>` });
     const showEmpty = () => { empty.hidden = results.children.length > 0; };
     const right = h("div", { class: "panel" },
-      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, psdBtn, zipBtn, clearBtn)),
+      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, editBtn, psdBtn, zipBtn, clearBtn)),
       progress, empty, results, notes);
 
     // paste support while this tab is active
@@ -284,15 +316,32 @@
       outputs.push(r);
       runOutputs.push(r);
       zipBtn.hidden = outputs.length < 2;
-      if (tool.psd) psdBtn.hidden = false;
+      if (tool.psd) psdBtn.hidden = editBtn.hidden = false;
+      if (r.kind === "text") {
+        const all = r.texts.map((t) => t.text).join("\n\n");
+        r.card = h("div", { class: "result text-result" },
+          h("div", { class: "meta" },
+            h("div", { class: "name" }, `Chữ trong ảnh (${r.texts.length} khối)`),
+            h("div", { class: "text-list" }, r.texts.map((t) =>
+              h("div", { class: "text-item" },
+                h("div", {}, h("div", { class: "text-content" }, t.text),
+                  h("div", { class: "text-meta" }, [t.font_guess, t.color, t.weight].filter(Boolean).join(" · "))),
+                h("button", { class: "btn small ghost", onclick: () => { navigator.clipboard?.writeText(t.text); toast("Đã sao chép"); } }, "Chép")))),
+            h("div", { class: "acts" },
+              h("button", { class: "btn small", onclick: () => { navigator.clipboard?.writeText(all); toast("Đã sao chép tất cả"); } }, "Chép tất cả"),
+              h("button", { class: "btn small ghost", onclick: () => IU.download(URL.createObjectURL(new Blob([all], { type: "text/plain;charset=utf-8" })), "chu-trong-anh.txt") }, "Tải .txt"))));
+        results.prepend(r.card);
+        showEmpty();
+        return;
+      }
       const fname = (r.name || tool.id) + (r.svg ? ".svg" : "");
       const pngName = (r.name || tool.id) + ".png";
-      const card = h("div", { class: "result" },
+      const card = r.card = h("div", { class: "result" },
         h("div", { class: "img-wrap", onclick: () => openCompare(r.before, r.src) }, h("img", { src: r.src, alt: r.name })),
         h("div", { class: "meta" },
           h("div", { class: "name", title: r.name }, r.name),
           h("div", { class: "acts" },
-            h("button", { class: "btn small primary", onclick: () => downloadResult(r.src, pngName) }, "Tải PNG"),
+            h("button", { class: "btn small primary", onclick: () => downloadResult(r.src, (r.name || tool.id) + ".png") }, "Tải PNG"),
             r.svg ? h("button", { class: "btn small", onclick: () => IU.download(URL.createObjectURL(new Blob([r.svg], { type: "image/svg+xml" })), fname) }, "Tải SVG") : null,
             r.before ? h("button", { class: "btn small ghost", onclick: () => openCompare(r.before, r.src) }, "So sánh") : null,
             h("button", { class: "btn small ghost", title: "Dùng ảnh này làm ảnh đầu vào", onclick: () => { tool.inputs[0]._set(r.src); toast("Đã đặt làm ảnh đầu vào"); left.scrollIntoView({ behavior: "smooth" }); } }, "Dùng tiếp"))));
@@ -318,7 +367,7 @@
       const batch = tool.batch ? inputs.main.slice() : [null];
       runOutputs = [];
       runSource = inputs.main?.[0] || null;
-      psdBtn.hidden = true;
+      psdBtn.hidden = editBtn.hidden = true;
       let ok = 0;
       try {
         for (let b = 0; b < batch.length; b++) {
