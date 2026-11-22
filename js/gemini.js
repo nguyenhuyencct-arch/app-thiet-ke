@@ -3,7 +3,7 @@
   const BASE = "https://generativelanguage.googleapis.com/v1beta";
   const DEFAULTS = {
     apiKey: "",
-    imageModel: "gemini-3.1-flash-image",
+    imageModel: "gemini-3-pro-image",
     textModel: "gemini-2.5-flash",
     maxSide: 2048,
   };
@@ -13,7 +13,7 @@
       try {
         const v = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("studioai.settings") || "{}") };
         // gemini-2.5-flash-image was retired by Google on 2026-10-02
-        if (v.imageModel === "gemini-2.5-flash-image") v.imageModel = DEFAULTS.imageModel;
+        if (v.imageModel === "gemini-2.5-flash-image" || v.imageModel === "gemini-3.1-flash-image") v.imageModel = DEFAULTS.imageModel;
         return v;
       } catch { return { ...DEFAULTS }; }
     },

@@ -368,7 +368,7 @@
   $("#btnSaveSettings").addEventListener("click", () => {
     Gemini.Settings.set({
       apiKey: $("#setKey").value.trim(),
-      imageModel: $("#setImageModel").value.trim() || "gemini-3.1-flash-image",
+      imageModel: $("#setImageModel").value.trim() || "gemini-3-pro-image",
       textModel: $("#setTextModel").value.trim() || "gemini-2.5-flash",
       maxSide: Math.max(512, Math.min(4096, +$("#setMaxSide").value || 2048)),
     });
