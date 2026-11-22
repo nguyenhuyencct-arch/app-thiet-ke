@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Studio Thiết Kế AI</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2322d3ee'/%3E%3Cstop offset='1' stop-color='%23a855f7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M9 22l5-12 4 8 2-4 3 8z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 32 32"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M9 22l5-12 4 8 2-4 3 8z" fill="#fff"/></svg>
+      </div>
+      <div class="brand-name">Studio<span>AI</span></div>
+    </div>
+    <div class="chips">
+      <div class="chip" id="chipApi"><span class="dot"></span><span class="chip-label">API</span><b id="apiStatus">Chưa cấu hình</b></div>
+      <div class="chip"><span class="chip-label">Model</span><b id="modelName">—</b></div>
+      <div class="chip"><span class="chip-label">Đã xử lý</span><b id="processedCount">0</b></div>
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost" id="btnHistory" title="Ảnh đã tạo trong phiên">
+        <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></svg>
+        Thư viện
+      </button>
+      <button class="btn ghost" id="btnSettings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Cài đặt
+      </button>
+    </div>
+  </header>
+
+  <nav class="tabbar" id="tabbar"></nav>
+
+  <main id="views"></main>
+
+  <!-- Settings modal -->
+  <div class="modal" id="settingsModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>Cài đặt</h3>
+        <button class="icon-btn" data-close>&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>Gemini API Key</span>
+          <input type="password" id="setKey" placeholder="AIza..." autocomplete="off" />
+          <small>Lấy miễn phí tại <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Key chỉ lưu trong trình duyệt của bạn.</small>
+        </label>
+        <label class="field">
+          <span>Model tạo / sửa ảnh</span>
+          <input type="text" id="setImageModel" list="imageModels" />
+          <datalist id="imageModels">
+            <option value="gemini-2.5-flash-image">Nhanh, rẻ</option>
+            <option value="gemini-3-pro-image-preview">Chất lượng cao hơn</option>
+          </datalist>
+        </label>
+        <label class="field">
+          <span>Model văn bản (phân tích ảnh)</span>
+          <input type="text" id="setTextModel" list="textModels" />
+          <datalist id="textModels">
+            <option value="gemini-2.5-flash"></option>
+            <option value="gemini-2.5-pro"></option>
+          </datalist>
+        </label>
+        <label class="field">
+          <span>Cạnh dài tối đa khi gửi ảnh lên AI (px)</span>
+          <input type="number" id="setMaxSide" min="512" max="4096" step="64" />
+        </label>
+        <div class="test-row">
+          <button class="btn" id="btnTestKey">Kiểm tra kết nối</button>
+          <span id="testResult"></span>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close>Hủy</button>
+        <button class="btn primary" id="btnSaveSettings">Lưu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compare modal -->
+  <div class="modal" id="compareModal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3>So sánh trước / sau</h3>
+        <button class="icon-btn" data-close>&times;</button>
+      </div>
+      <div class="compare" id="compareBox">
+        <img class="cmp-after" alt="Sau" />
+        <div class="cmp-before-wrap"><img class="cmp-before" alt="Trước" /></div>
+        <div class="cmp-handle"><span></span></div>
+        <div class="cmp-tag left">Trước</div><div class="cmp-tag right">Sau</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery modal -->
+  <div class="modal" id="galleryModal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <h3>Thư viện phiên làm việc</h3>
+        <button class="icon-btn" data-close>&times;</button>
+      </div>
+      <div class="modal-body"><div class="results" id="galleryGrid"></div></div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts"></div>
+
+  <script src="vendor/imagetracer_v1.2.6.js"></script>
+  <script src="js/imageutils.js"></script>
+  <script src="js/gemini.js"></script>
+  <script src="js/tools.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
