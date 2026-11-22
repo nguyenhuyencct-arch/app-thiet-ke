@@ -4,7 +4,8 @@
  * ctx.img(key)        → first dataURL of an image input (for batch tools: the current item of "main")
  * ctx.imgs(key)       → all dataURLs of an input
  * ctx.opt             → option values
- * ctx.ai.image({...}) → dataURL of the generated image (Gemini)
+ * ctx.ai.image({...}) → dataURL of the generated image (Gemini). Pass tier: "lite"|"flash"|"pro"
+ *                       to override the tool's default tier for one call.
  * ctx.ai.text({...})  → text / JSON answer (Gemini)
  * ctx.progress(msg, fraction?)
  * ctx.emit({ src, name, svg?, before? }) → push a result card
@@ -37,7 +38,7 @@
 
   /* 1 ─ Kích nét ảnh */
   T.push({
-    id: "enhance", name: "Kích nét ảnh", icon: I.enhance, color: "#38bdf8", cat: "photo", batch: true,
+    id: "enhance", tier: "flash", name: "Kích nét ảnh", icon: I.enhance, color: "#38bdf8", cat: "photo", batch: true,
     desc: "Tăng độ sắc nét, cải thiện chi tiết và chất lượng ảnh mờ, thiếu nét, ảnh nhỏ.",
     inputs: [{ key: "main", label: "Ảnh cần làm nét", required: true }],
     options: [
@@ -69,7 +70,7 @@
 
   /* 2 ─ Xóa nền PNG */
   T.push({
-    id: "removebg", name: "Xóa nền PNG", icon: I.layers2, color: "#c084fc", cat: "photo", batch: true,
+    id: "removebg", tier: "lite", name: "Xóa nền PNG", icon: I.layers2, color: "#c084fc", cat: "photo", batch: true,
     desc: "Tự động tách nền nhanh, chính xác, giữ nguyên chi tiết chủ thể. Xuất PNG trong suốt.",
     inputs: [{ key: "main", label: "Ảnh cần xóa nền", required: true }],
     options: [
@@ -98,7 +99,7 @@
 
   /* 3 ─ Bóc tách layer */
   T.push({
-    id: "layers", name: "Bóc Tách Layer", icon: I.layers, color: "#818cf8", cat: "design",
+    id: "layers", tier: "flash", name: "Bóc Tách Layer", icon: I.layers, color: "#818cf8", cat: "design",
     desc: "Tự động phân tách tối đa 9 đối tượng thành các file PNG không nền & 1 ảnh nền background.",
     inputs: [{ key: "main", label: "Ảnh thiết kế / ảnh chụp", required: true }],
     options: [
@@ -150,7 +151,7 @@
 
   /* 4 ─ Phục hồi ấn phẩm */
   T.push({
-    id: "reprint", name: "Phục hồi ấn phẩm", icon: I.brush, color: "#34d399", cat: "print",
+    id: "reprint", tier: "pro", name: "Phục hồi ấn phẩm", icon: I.brush, color: "#34d399", cat: "print",
     desc: "Tái tạo biển bảng, banner cũ từ ảnh chụp thành bản thiết kế phẳng, sắc nét, chuẩn in.",
     inputs: [{ key: "main", label: "Ảnh chụp ấn phẩm (banner, biển, tờ rơi…)", required: true }],
     options: [
@@ -180,7 +181,7 @@
 
   /* 5 ─ Retoucher sản phẩm */
   T.push({
-    id: "retouch", name: "Retoucher sản phẩm", icon: I.bag, color: "#22d3ee", cat: "ecom", batch: true,
+    id: "retouch", tier: "flash", name: "Retoucher sản phẩm", icon: I.bag, color: "#22d3ee", cat: "ecom", batch: true,
     desc: "Xóa tạp chất, tối ưu ánh sáng & thay phông studio chuẩn E-commerce.",
     inputs: [{ key: "main", label: "Ảnh sản phẩm", required: true }],
     options: [
@@ -221,7 +222,7 @@
 
   /* 6 ─ Render 2D sang 3D */
   T.push({
-    id: "render3d", name: "Render 2D sang 3D", icon: I.cube, color: "#fbbf24", cat: "design",
+    id: "render3d", tier: "pro", name: "Render 2D sang 3D", icon: I.cube, color: "#fbbf24", cat: "design",
     desc: "Dựng bản vẽ, nhãn mác, bao bì 2D thành ảnh sản phẩm 3D thương mại chân thực.",
     inputs: [
       { key: "main", label: "File thiết kế 2D (nhãn, hộp, bản vẽ…)", required: true },
@@ -257,7 +258,7 @@
 
   /* 7 ─ Chuyển Vector */
   T.push({
-    id: "vector", name: "Chuyển Vector", icon: I.vector, color: "#60a5fa", cat: "print", local: true, batch: true,
+    id: "vector", tier: "lite", name: "Chuyển Vector", icon: I.vector, color: "#60a5fa", cat: "print", local: true, batch: true,
     desc: "Trace ảnh màu hoặc đen trắng thành file SVG, dùng được cho in ấn và thiết kế.",
     inputs: [{ key: "main", label: "Ảnh logo / hình minh họa", required: true }],
     options: [
@@ -289,7 +290,7 @@
 
   /* 8 ─ Thiết kế quảng cáo */
   T.push({
-    id: "ads", name: "Thiết kế quảng cáo", icon: I.sparkle, color: "#f59e0b", cat: "design",
+    id: "ads", tier: "pro", name: "Thiết kế quảng cáo", icon: I.sparkle, color: "#f59e0b", cat: "design",
     desc: "Lên bố cục banner, poster và ảnh sản phẩm quảng cáo trong một studio trực quan.",
     inputs: [
       { key: "main", label: "Ảnh sản phẩm", required: true },
@@ -346,7 +347,7 @@
 
   /* 9 ─ Fake Model AI */
   T.push({
-    id: "model", name: "Fake Model AI", icon: I.user, color: "#a78bfa", cat: "fashion",
+    id: "model", tier: "flash", name: "Fake Model AI", icon: I.user, color: "#a78bfa", cat: "fashion",
     desc: "Ghép dáng mẫu từ Ảnh 1, giữ nguyên khuôn mặt, vóc dáng & trang phục từ Ảnh 2.",
     inputs: [
       { key: "pose", label: "Ảnh 1 – Dáng / bối cảnh mẫu", required: true },
@@ -375,7 +376,7 @@
 
   /* 10 ─ Thay trang phục */
   T.push({
-    id: "outfit", name: "Thay trang phục", icon: I.shirt, color: "#f472b6", cat: "fashion",
+    id: "outfit", tier: "flash", name: "Thay trang phục", icon: I.shirt, color: "#f472b6", cat: "fashion",
     desc: "Thử đồ thời trang, đổi váy áo, vest, trang phục chụp ảnh AI giữ nguyên khuôn mặt.",
     inputs: [
       { key: "main", label: "Ảnh người mẫu", required: true },
@@ -412,7 +413,7 @@
 
   /* 11 ─ Studio POD */
   T.push({
-    id: "pod", name: "Studio POD", icon: I.pod, color: "#818cf8", cat: "ecom",
+    id: "pod", tier: "flash", name: "Studio POD", icon: I.pod, color: "#818cf8", cat: "ecom",
     desc: "Phục hồi file in mờ thành bản in sắc nét, tạo Mockup áo, cốc, túi bán hàng Etsy, Amazon.",
     inputs: [{ key: "main", label: "File thiết kế / ảnh chụp mẫu in", required: true }],
     options: [
@@ -432,6 +433,7 @@
         ctx.progress("Đang phục hồi file in…", step++ / steps);
         const { w, h } = await IU.size(design);
         const out = await ctx.ai.image({
+          tier: "pro",
           images: [design], aspectRatio: IU.nearestRatio(w, h),
           prompt:
             "Extract and restore the printed graphic design from this image as a clean, flat, high-resolution print file. Remove fabric texture, wrinkles, perspective, blur and noise. " +
@@ -460,7 +462,7 @@
 
   /* 12 ─ Phối cảnh biển hiệu */
   T.push({
-    id: "signage", name: "Phối cảnh biển hiệu", icon: I.store, color: "#fb923c", cat: "print",
+    id: "signage", tier: "pro", name: "Phối cảnh biển hiệu", icon: I.store, color: "#fb923c", cat: "print",
     desc: "Gắn bản thiết kế biển hiệu 2D vào ảnh mặt tiền thực tế, chuẩn phối cảnh & bóng đổ 3D.",
     inputs: [
       { key: "main", label: "Bản thiết kế biển hiệu 2D", required: true },
@@ -498,7 +500,7 @@
 
   /* 13 ─ Phục hồi ảnh cũ */
   T.push({
-    id: "oldphoto", name: "Phục hồi ảnh cũ", icon: I.history, color: "#f87171", cat: "photo", batch: true,
+    id: "oldphoto", tier: "flash", name: "Phục hồi ảnh cũ", icon: I.history, color: "#f87171", cat: "photo", batch: true,
     desc: "Khử xước, vết ố, rách gấp, làm rõ khuôn mặt và tô màu tự nhiên cho ảnh xưa.",
     inputs: [{ key: "main", label: "Ảnh cũ / ảnh scan", required: true }],
     options: [
@@ -524,7 +526,7 @@
 
   /* 14 ─ Bế file in ấn */
   T.push({
-    id: "diecut", name: "Bế file in ấn", icon: I.scissors, color: "#f472b6", cat: "print", local: true, batch: true,
+    id: "diecut", tier: "lite", name: "Bế file in ấn", icon: I.scissors, color: "#f472b6", cat: "print", local: true, batch: true,
     desc: "Tạo đường cắt (CutContour) tự động quanh hình, bo viền sticker, xuất file SVG cho máy cắt.",
     inputs: [{ key: "main", label: "Ảnh / sticker (nên là PNG trong suốt)", required: true }],
     options: [
@@ -554,7 +556,7 @@
 
   /* 15 ─ Chỉnh sửa ảnh thẻ */
   T.push({
-    id: "idphoto", name: "Chỉnh sửa ảnh thẻ", icon: I.idcard, color: "#4ade80", cat: "photo",
+    id: "idphoto", tier: "flash", name: "Chỉnh sửa ảnh thẻ", icon: I.idcard, color: "#4ade80", cat: "photo",
     desc: "Tạo ảnh thẻ chuẩn bằng AI: đổi trang phục, phông nền xanh/trắng, làm đẹp da & xếp in.",
     inputs: [{ key: "main", label: "Ảnh chân dung (nhìn thẳng)", required: true }],
     options: [
@@ -593,7 +595,7 @@
 
   /* 16 ─ Chỉnh sửa tự do */
   T.push({
-    id: "free", name: "Chỉnh sửa tự do", icon: I.wand, color: "#e879f9", cat: "design",
+    id: "free", tier: "flash", name: "Chỉnh sửa tự do", icon: I.wand, color: "#e879f9", cat: "design",
     desc: "Mô tả bằng lời bất kỳ chỉnh sửa nào bạn muốn, hoặc tạo ảnh mới từ ý tưởng.",
     inputs: [
       { key: "main", label: "Ảnh gốc (để trống để tạo ảnh mới)" },
@@ -647,6 +649,7 @@
     ctx.progress("Gemini đang tách chủ thể…", 0.3);
     const { w, h } = await IU.size(src);
     const out = await ctx.ai.image({
+      tier: "lite",
       images: [src], aspectRatio: IU.nearestRatio(w, h),
       prompt:
         "Keep the main subject exactly as it is (same position, size, edges, hair strands, details and colours) and replace the entire background with a perfectly flat, solid pure #00FF00 green. No shadows, no gradients, no outlines.",

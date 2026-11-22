@@ -33,7 +33,7 @@
     const s = Gemini.Settings.get();
     $("#apiStatus").textContent = s.apiKey ? "Đã kết nối" : "Chưa cấu hình";
     $("#chipApi").classList.toggle("ok", !!s.apiKey);
-    $("#modelName").textContent = s.imageModel;
+    $("#modelName").textContent = Gemini.MODES[s.mode].label;
     let n = 0;
     try { n = +localStorage.getItem("studioai.count") || 0; } catch {}
     $("#processedCount").textContent = n;
@@ -57,7 +57,7 @@
           h("div", { class: "card", style: `--c:${t.color}`, tabindex: 0, onclick: () => openTool(t.id), onkeydown: (e) => e.key === "Enter" && openTool(t.id) },
             h("div", { class: "card-top" }, h("div", { class: "card-icon", html: svg(t.icon) }), h("h3", {}, t.name)),
             h("p", {}, t.desc),
-            h("span", { class: "badge" + (t.local ? " local" : "") }, t.local ? "Offline" : "AI"))
+            h("span", { class: "badge" + (t.local ? " local" : "") }, t.local ? "Offline" : "AI · " + Gemini.TIER_LABEL[t.tier]))
         );
       }
       if (!grid.children.length) grid.append(h("p", { style: "color:var(--muted)" }, "Không có công cụ phù hợp."));
@@ -199,6 +199,17 @@
       left.append(h("label", { class: "field" }, h("span", {}, o.label), ctl));
     }
 
+    let modelOverride = "auto";
+    if (!tool.local) {
+      const sel = h("select", { onchange: (e) => (modelOverride = e.target.value) },
+        h("option", { value: "auto" }, `Tự động (công cụ này cần: ${Gemini.TIER_LABEL[tool.tier]})`),
+        h("option", { value: "lite" }, "Lite — rẻ nhất"),
+        h("option", { value: "flash" }, "Flash — cân bằng"),
+        h("option", { value: "pro" }, "Pro — đẹp nhất"));
+      left.append(h("label", { class: "field" }, h("span", {}, "Model AI"), sel,
+        h("small", {}, "“Tự động” chọn theo chế độ trong Cài đặt. Kết quả trùng yêu cầu sẽ được dùng lại, không tính phí lần hai.")));
+    }
+
     const runBtn = h("button", { class: "btn primary", html: svg(tool.icon) + "<span>Bắt đầu xử lý</span>" });
     const stopBtn = h("button", { class: "btn ghost", hidden: true }, "Dừng");
     left.append(h("div", { class: "run-row" }, runBtn, stopBtn));
@@ -240,7 +251,7 @@
       const card = h("div", { class: "result" },
         h("div", { class: "img-wrap", onclick: () => openCompare(r.before, r.src) }, h("img", { src: r.src, alt: r.name })),
         h("div", { class: "meta" },
-          h("div", { class: "name", title: r.name }, r.name),
+          h("div", { class: "name", title: r.name }, r.name + (r.model ? `  ·  ${r.model}` : "")),
           h("div", { class: "acts" },
             h("button", { class: "btn small primary", onclick: () => downloadResult(r.src, pngName) }, "Tải PNG"),
             r.svg ? h("button", { class: "btn small", onclick: () => IU.download(URL.createObjectURL(new Blob([r.svg], { type: "image/svg+xml" })), fname) }, "Tải SVG") : null,
@@ -278,11 +289,12 @@
             signal: aborter.signal,
             progress: (msg, f) => setStatus(prefix + msg, f == null ? null : (b + f) / batch.length),
             note: (txt) => notes.append(h("div", { class: "ai-note" }, txt)),
-            emit: (r) => { addResult({ ...r, name: (batch.length > 1 ? `${b + 1}-` : "") + r.name }); ok++; },
+            emit: (r) => { addResult({ ...r, model: ctx.lastModel, name: (batch.length > 1 ? `${b + 1}-` : "") + r.name }); ctx.lastModel = null; ok++; },
             ai: {
               image: async (args) => {
                 if (aborter.signal.aborted) throw new DOMException("Đã dừng", "AbortError");
-                const res = await Gemini.generateImage({ ...args, signal: aborter.signal });
+                const res = await Gemini.generateImage({ tier: tool.tier, ...args, override: modelOverride, signal: aborter.signal });
+                ctx.lastModel = Gemini.TIER_LABEL[res.tier] + (res.cached ? " · dùng lại" : "");
                 if (res.text?.trim()) ctx.note("AI: " + res.text.trim());
                 return res.images[0];
               },
@@ -358,7 +370,11 @@
   function openSettings() {
     const s = Gemini.Settings.get();
     $("#setKey").value = s.apiKey;
-    $("#setImageModel").value = s.imageModel;
+    document.querySelector(`input[name=setMode][value=${s.mode}]`).checked = true;
+    $("#setSize").value = s.imageSize;
+    $("#setLite").value = s.models.lite;
+    $("#setFlash").value = s.models.flash;
+    $("#setPro").value = s.models.pro;
     $("#setTextModel").value = s.textModel;
     $("#setMaxSide").value = s.maxSide;
     $("#testResult").textContent = "";
@@ -366,10 +382,17 @@
   }
   $("#btnSettings").addEventListener("click", openSettings);
   $("#btnSaveSettings").addEventListener("click", () => {
+    const d = Gemini.Settings.get();
     Gemini.Settings.set({
       apiKey: $("#setKey").value.trim(),
-      imageModel: $("#setImageModel").value.trim() || "gemini-3-pro-image",
-      textModel: $("#setTextModel").value.trim() || "gemini-2.5-flash",
+      mode: document.querySelector("input[name=setMode]:checked")?.value || "auto",
+      imageSize: $("#setSize").value,
+      models: {
+        lite: $("#setLite").value.trim() || d.models.lite,
+        flash: $("#setFlash").value.trim() || d.models.flash,
+        pro: $("#setPro").value.trim() || d.models.pro,
+      },
+      textModel: $("#setTextModel").value.trim() || d.textModel,
       maxSide: Math.max(512, Math.min(4096, +$("#setMaxSide").value || 2048)),
     });
     $("#settingsModal").hidden = true;
@@ -383,10 +406,12 @@
     out.textContent = "Đang kiểm tra…";
     try {
       const models = await Gemini.testKey(key);
-      const im = $("#setImageModel").value.trim();
-      out.innerHTML = models.includes(im)
-        ? `<span style="color:var(--ok)">✓ Kết nối OK — có model ${im}</span>`
-        : `<span style="color:var(--warn)">Key hợp lệ nhưng không thấy model “${im}”. Có sẵn: ${models.filter((m) => /image/.test(m)).join(", ") || "—"}</span>`;
+      const want = [["Lite", "#setLite"], ["Flash", "#setFlash"], ["Pro", "#setPro"]].map(([l, id]) => [l, $(id).value.trim()]);
+      out.innerHTML = want.map(([l, m]) => models.includes(m)
+        ? `<div style="color:var(--ok)">✓ ${l}: ${m}</div>`
+        : `<div style="color:var(--warn)">✗ ${l}: không thấy “${m}”</div>`).join("") +
+        (want.every(([, m]) => models.includes(m)) ? "" :
+          `<div style="color:var(--muted)">Model ảnh có sẵn: ${models.filter((m) => /image/.test(m)).join(", ") || "—"}</div>`);
     } catch (e) {
       out.innerHTML = `<span style="color:var(--err)">✗ ${e.message}</span>`;
     }

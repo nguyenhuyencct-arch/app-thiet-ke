@@ -17,7 +17,7 @@
     </div>
     <div class="chips">
       <div class="chip" id="chipApi"><span class="dot"></span><span class="chip-label">API</span><b id="apiStatus">Chưa cấu hình</b></div>
-      <div class="chip"><span class="chip-label">Model</span><b id="modelName">—</b></div>
+      <div class="chip"><span class="chip-label">Chế độ</span><b id="modelName">—</b></div>
       <div class="chip"><span class="chip-label">Đã xử lý</span><b id="processedCount">0</b></div>
     </div>
     <div class="top-actions">
@@ -49,23 +49,35 @@
           <input type="password" id="setKey" placeholder="AIza..." autocomplete="off" />
           <small>Lấy tại <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Nano Banana Pro cần bật thanh toán (Billing) cho key. Key chỉ lưu trong trình duyệt của bạn.</small>
         </label>
+        <div class="field">
+          <span>Chế độ dùng model</span>
+          <div class="seg">
+            <input type="radio" name="setMode" id="modeEco" value="eco"><label for="modeEco">Tiết kiệm</label>
+            <input type="radio" name="setMode" id="modeAuto" value="auto"><label for="modeAuto">Tối ưu (khuyên dùng)</label>
+            <input type="radio" name="setMode" id="modeQuality" value="quality"><label for="modeQuality">Chất lượng cao</label>
+          </div>
+          <small>
+            <b>Tiết kiệm:</b> không dùng Pro, ảnh 1K.<br>
+            <b>Tối ưu:</b> mỗi công cụ tự chọn model vừa đủ: Lite cho tách nền, Flash cho chỉnh ảnh, Pro cho quảng cáo / biển hiệu / ấn phẩm có chữ.<br>
+            <b>Chất lượng cao:</b> nâng mọi công cụ lên một bậc (Flash → Pro).
+          </small>
+        </div>
         <label class="field">
-          <span>Model tạo / sửa ảnh</span>
-          <input type="text" id="setImageModel" list="imageModels" />
-          <datalist id="imageModels">
-            <option value="gemini-3-pro-image">Nano Banana Pro — mặc định, đẹp nhất, chữ chuẩn</option>
-            <option value="gemini-3.1-flash-image">Nano Banana 2 — rẻ hơn, nhanh</option>
-            <option value="gemini-3.1-flash-lite-image">Rẻ nhất (kém hơn khi ghép nhiều ảnh)</option>
-          </datalist>
+          <span>Độ phân giải ảnh tạo ra</span>
+          <select id="setSize">
+            <option value="auto">Tự động theo chế độ (1K–2K)</option>
+            <option value="1K">1K — rẻ nhất</option>
+            <option value="2K">2K</option>
+            <option value="4K">4K — đắt nhất, dùng cho in khổ lớn</option>
+          </select>
         </label>
-        <label class="field">
-          <span>Model văn bản (phân tích ảnh)</span>
-          <input type="text" id="setTextModel" list="textModels" />
-          <datalist id="textModels">
-            <option value="gemini-2.5-flash"></option>
-            <option value="gemini-2.5-pro"></option>
-          </datalist>
-        </label>
+        <details class="field">
+          <summary>Nâng cao: tên model</summary>
+          <label class="field"><span>Lite</span><input type="text" id="setLite" /></label>
+          <label class="field"><span>Flash</span><input type="text" id="setFlash" /></label>
+          <label class="field"><span>Pro</span><input type="text" id="setPro" /></label>
+          <label class="field"><span>Model văn bản (nhận diện đối tượng)</span><input type="text" id="setTextModel" /></label>
+        </details>
         <label class="field">
           <span>Cạnh dài tối đa khi gửi ảnh lên AI (px)</span>
           <input type="number" id="setMaxSide" min="512" max="4096" step="64" />

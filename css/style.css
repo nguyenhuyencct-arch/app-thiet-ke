@@ -313,3 +313,5 @@ main { flex: 1; padding: 22px 18px 40px; }
 }
 .empty[hidden], .progress[hidden] { display: none; }
 .btn[hidden] { display: none; }
+details.field summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+.test-row { align-items: flex-start; }
