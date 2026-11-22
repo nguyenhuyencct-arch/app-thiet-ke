@@ -140,7 +140,8 @@
             `Replace absolutely everything else (background and all other elements) with a perfectly flat, solid pure ${keyHex} colour. No shadows, no reflections, no outlines, no other objects.`,
         });
         const fitted = await IU.fitTo(out, w, h, "cover");
-        ctx.emit({ src: await IU.chromaKey(fitted, keyRGB, 35), name: `layer-${String(i + 1).padStart(2, "0")}-${slug(objs[i])}`, before: src });
+        const mask = await IU.chromaKey(fitted, keyRGB, 35, 2);
+        ctx.emit({ src: await IU.maskOriginal(src, mask), name: `layer-${String(i + 1).padStart(2, "0")}-${slug(objs[i])}`, before: src });
       }
       if (ctx.opt.bgLayer) {
         ctx.progress(`Đang tạo layer nền ${total}/${total}`, (total - 0.8) / total);
@@ -662,10 +663,12 @@
       tier: "lite",
       images: [src], aspectRatio: IU.nearestRatio(w, h),
       prompt:
-        `Keep ${keep}, exactly as it is (same position, size, pose, hair strands, details and colours). ` +
+        `Keep ${keep}, pixel-aligned with the original: exactly the same position, size, pose, hair strands and outline. ` +
         "Replace everything else with a perfectly flat, uniform, solid pure #00FF00 green. No shadows, no gradients, no outline, no glow, no green tint or reflection on the subject.",
     });
-    return IU.chromaKey(await IU.fitTo(out, w, h, "cover"), [0, 255, 0], 35);
+    // AI output is used only as a mask; colours come from the original (no green cast on skin)
+    const mask = await IU.chromaKey(await IU.fitTo(out, w, h, "cover"), [0, 255, 0], 35, 2);
+    return IU.maskOriginal(src, mask);
   }
 
   window.TOOLS = T;

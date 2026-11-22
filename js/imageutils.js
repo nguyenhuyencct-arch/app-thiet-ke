@@ -219,6 +219,50 @@
     return c.toDataURL("image/png");
   };
 
+  /**
+   * Use `maskSrc` (an AI cut-out, same size) only for its ALPHA and take every colour from
+   * the untouched original. AI re-renders often tint skin with green "screen spill"; this
+   * guarantees the subject's colours are exactly the original photo's.
+   * Semi-transparent edge pixels get their colour from nearby solid subject pixels so the
+   * old background (wall, plants…) doesn't bleed into hair / edges.
+   */
+  IU.maskOriginal = async (origSrc, maskSrc, { edgeRadius = 3 } = {}) => {
+    const o = await IU.toCanvas(origSrc);
+    const W = o.width, H = o.height;
+    const m = await IU.loadImage(maskSrc);
+    const mc = IU.canvas(W, H);
+    mc.getContext("2d").drawImage(m, 0, 0, W, H);
+    const md = mc.getContext("2d").getImageData(0, 0, W, H).data;
+    const octx = o.getContext("2d");
+    const im = octx.getImageData(0, 0, W, H);
+    const d = im.data;
+    const src = new Uint8ClampedArray(d); // original colours for neighbour lookup
+    for (let p = 0; p < W * H; p++) d[p * 4 + 3] = md[p * 4 + 3];
+    const R = edgeRadius;
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        const a = d[i + 3];
+        if (a === 0 || a >= 250) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -R; dy <= R; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= H) continue;
+          for (let dx = -R; dx <= R; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= W) continue;
+            const j = (yy * W + xx) * 4;
+            if (md[j + 3] >= 250) { r += src[j]; g += src[j + 1]; b += src[j + 2]; n++; }
+          }
+        }
+        if (!n) continue;
+        const t = a / 255; // more transparent → trust the subject colour more
+        d[i] = src[i] * t + (r / n) * (1 - t);
+        d[i + 1] = src[i + 1] * t + (g / n) * (1 - t);
+        d[i + 2] = src[i + 2] * t + (b / n) * (1 - t);
+      }
+    octx.putImageData(im, 0, 0);
+    return o.toDataURL("image/png");
+  };
+
   /** Trim transparent margins. */
   IU.trim = async (src, pad = 0) => {
     const c = await IU.toCanvas(src);
