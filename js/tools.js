@@ -103,8 +103,8 @@
 
   /* 3 ─ Bóc tách layer */
   T.push({
-    id: "layers", tier: "flash", name: "Bóc Tách Layer", icon: I.layers, color: "#818cf8", cat: "design",
-    desc: "Tự động phân tách tối đa 9 đối tượng thành các file PNG không nền & 1 ảnh nền background.",
+    id: "layers", tier: "flash", psd: true, name: "Bóc Tách Layer", icon: I.layers, color: "#818cf8", cat: "design",
+    desc: "Tự động phân tách tối đa 9 đối tượng thành các layer PNG & 1 layer nền, xuất file PSD mở thẳng bằng Photoshop.",
     inputs: [{ key: "main", label: "Ảnh thiết kế / ảnh chụp", required: true }],
     options: [
       { key: "objects", label: "Các đối tượng cần tách (mỗi dòng một đối tượng)", type: "textarea", placeholder: "Để trống để AI tự nhận diện.\nVD:\nchai nước hoa\ndòng chữ tiêu đề\nlogo" },

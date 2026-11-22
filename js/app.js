@@ -218,7 +218,40 @@
       files.sort((a, b) => a.name.localeCompare(b.name));
       IU.download(URL.createObjectURL(IU.zip(files)), `${tool.id}-${Date.now()}.zip`);
     } }, "Tải tất cả (ZIP)");
-    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; outputs.length = 0; zipBtn.hidden = true; showEmpty(); } }, "Xóa kết quả");
+    let runOutputs = [];       // results of the most recent run (used for PSD)
+    let runSource = null;      // input image of the most recent run
+    const psdBtn = h("button", { class: "btn small primary", hidden: true, onclick: async () => {
+      psdBtn.disabled = true;
+      const label = psdBtn.textContent;
+      psdBtn.textContent = "Đang tạo PSD…";
+      try {
+        const { w, h: H } = await IU.size(runSource);
+        // bottom → top: original (hidden) · background · big elements … small elements
+        const bg = runOutputs.filter((r) => /layer-00/.test(r.name));
+        const els = [];
+        for (const r of runOutputs.filter((r) => !/layer-00/.test(r.name))) {
+          const b = IU.alphaBounds(await IU.toCanvas(r.src));
+          els.push({ r, area: b ? b.w * b.h : 0 });
+        }
+        els.sort((a, b) => b.area - a.area);
+        const pretty = (n) => n.replace(/^(\d+-)?layer-\d+-?/, "").replace(/-/g, " ").trim() || n;
+        const layers = [
+          { name: "Ảnh gốc", src: runSource, hidden: true },
+          ...bg.map((r) => ({ name: "Nền", src: r.src })),
+          ...els.map(({ r }) => ({ name: pretty(r.name), src: r.src })),
+        ];
+        const blob = await IU.buildPSD(layers, w, H);
+        IU.download(URL.createObjectURL(blob), `${tool.id}-${Date.now()}.psd`);
+        toast("Đã xuất PSD " + layers.length + " layer", "ok");
+      } catch (e) {
+        console.error(e);
+        toast("Xuất PSD lỗi: " + e.message, "err");
+      } finally {
+        psdBtn.disabled = false;
+        psdBtn.textContent = label;
+      }
+    } }, "Tải PSD");
+    const clearBtn = h("button", { class: "btn small ghost", onclick: () => { results.innerHTML = ""; notes.innerHTML = ""; outputs.length = 0; runOutputs = []; zipBtn.hidden = psdBtn.hidden = true; showEmpty(); } }, "Xóa kết quả");
     const bar = h("div");
     const progress = h("div", { class: "progress", hidden: true }, bar);
     const results = h("div", { class: "results" });
@@ -226,7 +259,7 @@
     const empty = h("div", { class: "empty", html: `<div>${svg('<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-5-5L5 21"/>')}<div>Kết quả sẽ hiển thị ở đây</div></div>` });
     const showEmpty = () => { empty.hidden = results.children.length > 0; };
     const right = h("div", { class: "panel" },
-      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, zipBtn, clearBtn)),
+      h("div", { class: "output-head" }, h("h3", {}, "Kết quả"), h("div", { style: "display:flex;gap:10px;align-items:center" }, statusEl, psdBtn, zipBtn, clearBtn)),
       progress, empty, results, notes);
 
     // paste support while this tab is active
@@ -249,7 +282,9 @@
 
     function addResult(r) {
       outputs.push(r);
+      runOutputs.push(r);
       zipBtn.hidden = outputs.length < 2;
+      if (tool.psd) psdBtn.hidden = false;
       const fname = (r.name || tool.id) + (r.svg ? ".svg" : "");
       const pngName = (r.name || tool.id) + ".png";
       const card = h("div", { class: "result" },
@@ -281,6 +316,9 @@
       tab.abort = aborter; tab.busy = true; renderTabs();
       runBtn.disabled = true; stopBtn.hidden = false; notes.innerHTML = "";
       const batch = tool.batch ? inputs.main.slice() : [null];
+      runOutputs = [];
+      runSource = inputs.main?.[0] || null;
+      psdBtn.hidden = true;
       let ok = 0;
       try {
         for (let b = 0; b < batch.length; b++) {

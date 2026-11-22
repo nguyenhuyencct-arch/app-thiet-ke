@@ -8,7 +8,7 @@
 |---|---|---|
 | Kích nét ảnh | Làm nét, tái tạo chi tiết, phóng to ảnh mờ | AI / offline |
 | Xóa nền PNG | Tách nền trong suốt, thay nền màu, xử lý hàng loạt | Offline / AI |
-| Bóc tách Layer | Tách tối đa 9 đối tượng thành PNG + 1 layer nền | AI |
+| Bóc tách Layer | Tách tối đa 9 đối tượng thành PNG + 1 layer nền, xuất **PSD** nhiều layer hoặc ZIP | AI |
 | Phục hồi ấn phẩm | Ảnh chụp banner/biển cũ → file thiết kế phẳng, sắc nét | AI |
 | Retoucher sản phẩm | Làm sạch, chỉnh sáng, thay phông studio TMĐT | AI |
 | Render 2D sang 3D | Nhãn, bao bì, bản vẽ 2D → ảnh sản phẩm 3D | AI |
@@ -48,7 +48,7 @@ js/app.js           tab, form, kết quả, cài đặt
 js/tools.js         định nghĩa 16 công cụ (input, tùy chọn, prompt)
 js/gemini.js        gọi Gemini API
 js/imageutils.js    xử lý ảnh trên canvas (chroma key, vector, bế, ảnh thẻ…)
-vendor/             imagetracerjs (public domain)
+vendor/             imagetracerjs (public domain), ag-psd (MIT, xuất PSD — chỉ tải khi bấm "Tải PSD")
 ```
 
 Muốn thêm công cụ mới: thêm một mục `T.push({...})` vào `js/tools.js`.

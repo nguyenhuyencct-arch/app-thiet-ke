@@ -572,6 +572,54 @@
     return { png: c.toDataURL("image/png"), count: rows * cols, single: photo.src };
   };
 
+  /* ---------- PSD export (ag-psd, loaded on demand) ---------- */
+  let psdLib = null;
+  IU.loadPsdLib = () =>
+    psdLib || (psdLib = new Promise((resolve, reject) => {
+      if (window.agPsd) return resolve(window.agPsd);
+      const s = document.createElement("script");
+      s.src = "vendor/ag-psd-34.2.3.js";
+      s.onload = () => (window.agPsd ? resolve(window.agPsd) : reject(new Error("Không tải được thư viện PSD")));
+      s.onerror = () => { psdLib = null; reject(new Error("Không tải được thư viện PSD")); };
+      document.head.append(s);
+    }));
+
+  /** Bounding box of non-transparent pixels → {x, y, w, h} or null. */
+  IU.alphaBounds = (canvas) => {
+    const W = canvas.width, H = canvas.height;
+    const d = canvas.getContext("2d").getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        if (d[(y * W + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  };
+
+  /**
+   * Build a layered PSD.
+   * layers: [{ name, src, hidden? }] bottom → top. All are drawn at the document size (W×H)
+   * and cropped to their visible pixels so the file stays small.
+   */
+  IU.buildPSD = async (layers, W, H) => {
+    const ag = await IU.loadPsdLib();
+    const composite = IU.canvas(W, H);
+    const cctx = composite.getContext("2d");
+    const children = [];
+    for (const L of layers) {
+      const img = await IU.loadImage(L.src);
+      const full = IU.canvas(W, H);
+      full.getContext("2d").drawImage(img, 0, 0, W, H);
+      if (!L.hidden) cctx.drawImage(full, 0, 0);
+      const b = IU.alphaBounds(full);
+      if (!b) continue;
+      const crop = IU.canvas(b.w, b.h);
+      crop.getContext("2d").drawImage(full, -b.x, -b.y);
+      children.push({ name: L.name, left: b.x, top: b.y, canvas: crop, hidden: !!L.hidden });
+    }
+    const buf = ag.writePsd({ width: W, height: H, children, canvas: composite }, { generateThumbnail: true });
+    return new Blob([buf], { type: "image/vnd.adobe.photoshop" });
+  };
+
   IU.dataURLToBytes = async (u) => new Uint8Array(await (await fetch(u)).arrayBuffer());
 
   /** Minimal ZIP writer (store, no compression — PNGs are already compressed). files: [{name, data:Uint8Array}] */
