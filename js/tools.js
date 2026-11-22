@@ -75,6 +75,8 @@
     inputs: [{ key: "main", label: "Ảnh cần xóa nền", required: true }],
     options: [
       { key: "engine", label: "Bộ xử lý", type: "seg", default: "local", choices: [["local", "Offline (miễn phí)"], ["ai", "Gemini AI"]] },
+      { key: "keep", label: "Giữ lại", type: "seg", default: "person", choices: [["person", "Chỉ người / chủ thể chính"], ["all", "Cả đồ vật tiền cảnh"], ["custom", "Tùy chỉnh"]] },
+      { key: "keepText", label: "Mô tả thứ cần giữ (khi chọn Tùy chỉnh)", type: "text", placeholder: "VD: cô gái và chiếc cốc" },
       { key: "bg", label: "Nền thay thế", type: "seg", default: "none", choices: [["none", "Trong suốt"], ["#ffffff", "Trắng"], ["#000000", "Đen"], ["custom", "Màu khác"]] },
       { key: "custom", label: "Màu nền tùy chọn", type: "color", default: "#f1f5f9" },
       { key: "trim", label: "Cắt sát chủ thể", type: "check", default: false },
@@ -85,12 +87,14 @@
       if (ctx.opt.engine === "local") {
         try {
           png = await removeBgLocal(src, ctx);
+          // remove half-transparent "ghost" objects; in person mode keep only the main subject
+          png = await IU.refineAlpha(png, { cut: 0.45, keepLargest: ctx.opt.keep === "person" });
         } catch (e) {
           console.warn(e);
           ctx.note("Bộ xử lý offline không tải được (" + e.message + "). Đã chuyển sang Gemini AI.");
-          png = await removeBgAI(src, ctx);
+          png = await removeBgAI(src, ctx, keepPrompt(ctx.opt));
         }
-      } else png = await removeBgAI(src, ctx);
+      } else png = await removeBgAI(src, ctx, keepPrompt(ctx.opt));
       if (ctx.opt.trim) png = await IU.trim(png, 4);
       const bg = ctx.opt.bg === "none" ? null : ctx.opt.bg === "custom" ? ctx.opt.custom : ctx.opt.bg;
       ctx.emit({ src: await IU.flatten(png, bg), name: "xoa-nen", before: src });
@@ -645,14 +649,21 @@
     return await IU.fileToDataURL(blob);
   }
 
-  async function removeBgAI(src, ctx) {
+  function keepPrompt(o) {
+    if (o.keep === "all") return "the main subject together with every foreground object (people, products, props on the table)";
+    if (o.keep === "custom" && o.keepText?.trim()) return `only: ${o.keepText.trim()}`;
+    return "ONLY the main subject (the person if there is one). Remove everything else as background, including desks, tables, cups, laptops, props and furniture";
+  }
+
+  async function removeBgAI(src, ctx, keep = "the main subject") {
     ctx.progress("Gemini đang tách chủ thể…", 0.3);
     const { w, h } = await IU.size(src);
     const out = await ctx.ai.image({
       tier: "lite",
       images: [src], aspectRatio: IU.nearestRatio(w, h),
       prompt:
-        "Keep the main subject exactly as it is (same position, size, edges, hair strands, details and colours) and replace the entire background with a perfectly flat, solid pure #00FF00 green. No shadows, no gradients, no outlines.",
+        `Keep ${keep}, exactly as it is (same position, size, pose, hair strands, details and colours). ` +
+        "Replace everything else with a perfectly flat, uniform, solid pure #00FF00 green. No shadows, no gradients, no outline, no glow, no green tint or reflection on the subject.",
     });
     return IU.chromaKey(await IU.fitTo(out, w, h, "cover"), [0, 255, 0], 35);
   }

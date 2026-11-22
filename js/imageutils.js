@@ -94,30 +94,126 @@
   };
 
   /**
-   * Chroma-key: turn a flat-colour background into transparency with soft edges and de-spill.
+   * Chroma-key: turn a flat-colour background (green / magenta / any) into transparency.
+   * Uses "key-channel excess" (e.g. G − max(R,B) for green) instead of plain RGB distance,
+   * which separates hair and soft edges much better, then:
+   *   – fully de-spills the key colour on every tinted pixel (no green fringe),
+   *   – erodes the alpha by `erode` px to remove the 1-px halo ring,
+   *   – lightly feathers the edge.
    * keyColor: [r,g,b] or null (auto from border). tol: 0..100 strength.
    */
-  IU.chromaKey = async (src, keyColor = null, tol = 40) => {
+  IU.chromaKey = async (src, keyColor = null, tol = 40, erode = 1) => {
     const c = await IU.toCanvas(src);
+    const W = c.width, H = c.height;
     const ctx = c.getContext("2d");
-    const im = ctx.getImageData(0, 0, c.width, c.height);
+    const im = ctx.getImageData(0, 0, W, H);
     const d = im.data;
-    const key = keyColor || IU.borderColor(d, c.width, c.height);
-    const lo = 20 + tol * 1.2;  // fully transparent below this distance
-    const hi = lo + 60;          // fully opaque above
-    // which channel dominates the key colour (for de-spill)
-    const dom = key.indexOf(Math.max(...key));
-    for (let i = 0; i < d.length; i += 4) {
-      const dr = d[i] - key[0], dg = d[i + 1] - key[1], db = d[i + 2] - key[2];
-      const dist = Math.sqrt(dr * dr + dg * dg + db * db);
-      let a = dist <= lo ? 0 : dist >= hi ? 1 : (dist - lo) / (hi - lo);
-      if (a < 1) {
-        // de-spill the dominant key channel on semi-transparent pixels
-        const others = [0, 1, 2].filter((k) => k !== dom).map((k) => d[i + k]);
-        const cap = Math.max(...others);
-        if (d[i + dom] > cap) d[i + dom] = cap + (d[i + dom] - cap) * a;
+    const key = keyColor || IU.borderColor(d, W, H);
+    // dominant channel(s) of the key: green → [1]; magenta → [0,2]; blue → [2]
+    const kmax = Math.max(...key);
+    const dom = [0, 1, 2].filter((k) => key[k] > kmax * 0.6);
+    const oth = [0, 1, 2].filter((k) => !dom.includes(k));
+    const keyExcess = Math.max(1, Math.min(...dom.map((k) => key[k])) - Math.max(0, ...oth.map((k) => key[k])));
+    const lo = 0.08 + tol / 1000;   // below → fully opaque
+    const hi = 0.38 + tol / 500;    // above → fully transparent
+    const A = new Float32Array(W * H);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      const domV = Math.min(...dom.map((k) => d[i + k]));
+      const othV = oth.length ? Math.max(...oth.map((k) => d[i + k])) : 0;
+      const ratio = (domV - othV) / keyExcess;
+      let a = ratio <= lo ? 1 : ratio >= hi ? 0 : 1 - (ratio - lo) / (hi - lo);
+      a = a * a * (3 - 2 * a); // smoothstep
+      if (ratio > 0.02) {
+        // de-spill: pull the key channel(s) down to the level of the others
+        for (const k of dom) d[i + k] = Math.min(d[i + k], othV + 6);
       }
-      d[i + 3] = Math.round(d[i + 3] * a);
+      A[p] = a * (d[i + 3] / 255);
+    }
+    // erode (min filter) to kill the halo ring, then 3x3 box feather
+    let cur = A;
+    for (let e = 0; e < erode; e++) {
+      const n = new Float32Array(W * H);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          let m = cur[y * W + x];
+          if (m > 0) {
+            if (x > 0) m = Math.min(m, cur[y * W + x - 1]);
+            if (x < W - 1) m = Math.min(m, cur[y * W + x + 1]);
+            if (y > 0) m = Math.min(m, cur[(y - 1) * W + x]);
+            if (y < H - 1) m = Math.min(m, cur[(y + 1) * W + x]);
+          }
+          n[y * W + x] = m;
+        }
+      cur = n;
+    }
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        let sum = 0, cnt = 0;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx >= 0 && yy >= 0 && xx < W && yy < H) { sum += cur[yy * W + xx]; cnt++; }
+          }
+        const orig = cur[y * W + x];
+        // keep solid interiors solid, only soften real edges
+        d[(y * W + x) * 4 + 3] = Math.round(255 * (orig === 1 ? 1 : Math.min(orig + 0.15, sum / cnt)));
+      }
+    ctx.putImageData(im, 0, 0);
+    return c.toDataURL("image/png");
+  };
+
+  /**
+   * Clean up a soft AI mask:
+   *  – contrast curve so half-transparent "ghost" objects become either solid or gone,
+   *  – optionally keep only the largest connected subject (drops stray cups, laptops…).
+   */
+  IU.refineAlpha = async (src, { cut = 0.45, keepLargest = false } = {}) => {
+    const c = await IU.toCanvas(src);
+    const W = c.width, H = c.height;
+    const ctx = c.getContext("2d");
+    const im = ctx.getImageData(0, 0, W, H);
+    const d = im.data;
+    const lo = Math.max(0, cut - 0.08), hi = Math.min(1, cut + 0.08);
+    for (let i = 3; i < d.length; i += 4) {
+      const a = d[i] / 255;
+      let v = a <= lo ? 0 : a >= hi ? 1 : (a - lo) / (hi - lo);
+      v = v * v * (3 - 2 * v);
+      d[i] = Math.round(v * 255);
+    }
+    if (keepLargest) {
+      const label = new Int32Array(W * H);
+      const sizes = [0];
+      const stack = [];
+      for (let p = 0; p < W * H; p++) {
+        if (label[p] || d[p * 4 + 3] < 128) continue;
+        const id = sizes.length;
+        let size = 0;
+        label[p] = id; stack.push(p);
+        while (stack.length) {
+          const q = stack.pop(); size++;
+          const x = q % W, y = (q / W) | 0;
+          const nb = [x > 0 ? q - 1 : -1, x < W - 1 ? q + 1 : -1, y > 0 ? q - W : -1, y < H - 1 ? q + W : -1];
+          for (const n of nb) if (n >= 0 && !label[n] && d[n * 4 + 3] >= 128) { label[n] = id; stack.push(n); }
+        }
+        sizes.push(size);
+      }
+      if (sizes.length > 2) {
+        let best = 1;
+        for (let k = 2; k < sizes.length; k++) if (sizes[k] > sizes[best]) best = k;
+        // dilate the kept region a little so soft edge pixels (alpha < 128) survive
+        const keep = new Uint8Array(W * H);
+        for (let p = 0; p < W * H; p++) if (label[p] === best) keep[p] = 1;
+        for (let pass = 0; pass < 3; pass++) {
+          const add = [];
+          for (let p = 0; p < W * H; p++) {
+            if (keep[p] || d[p * 4 + 3] === 0) continue;
+            const x = p % W;
+            if ((x > 0 && keep[p - 1]) || (x < W - 1 && keep[p + 1]) || keep[p - W] || keep[p + W]) add.push(p);
+          }
+          for (const p of add) keep[p] = 1;
+        }
+        for (let p = 0; p < W * H; p++) if (!keep[p]) d[p * 4 + 3] = 0;
+      }
     }
     ctx.putImageData(im, 0, 0);
     return c.toDataURL("image/png");
